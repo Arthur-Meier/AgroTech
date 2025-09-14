@@ -1,90 +1,102 @@
-/**
- * AnimalForm Screen (React Native)
- * -----------------------------------------------------------------------------
- * PURPOSE
- *  - Create or edit an Animal record.
- *  - If `route.params?.id` is present, loads the existing record for editing;
- *    otherwise behaves as a creation form.
- *
- * DATA FLOW
- *  - Read (edit mode): direct SQL via `withDb` to fetch a single row by `id`.
- *  - Write: repository function `upsertAnimal` (native: SQLite; web: localStorage).
- *
- * UX NOTES
- *  - Minimal validation: requires `tag`; defaults sex to 'F' unless user types 'M'.
- *  - Birth date is free-text ISO (YYYY-MM-DD) for now; consider a date picker later.
- *
- * ROUTING
- *  - Typed with `RouteProp<RootStackParamList, 'AnimalForm'>` to ensure params
- *    stay in sync with the navigation config.
- *
- * Last reviewed: 2025-09-04
- */
-
 import React, { useEffect, useState } from 'react';
 import { View, Text, TextInput, Pressable, Alert } from 'react-native';
-// Repository function encapsulates persistence details (SQLite vs Web).
-import { upsertAnimal } from '@/data/animal.repo';
-// Low-level helper to run a single SQL transaction/statement.
-import { getAll } from '@/core/db/sqlite';
-// Domain interface used to type the row fetched from SQLite.
-import type { Animal } from '@/domain/animal';
-// React Navigation hooks for reading params and navigating back.
-import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
-// Stack param list ensures route names/params are type-safe.
+import { upsertAnimal, getAnimalById } from '@/data/animal.repo';
+import type { Sex, AnimalType, Animal } from '@/domain/animal';
+import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { RootStackParamList } from '@/app/navigation';
 
-// Strongly typed route props for this screen.
 type Props = RouteProp<RootStackParamList, 'AnimalForm'>;
 
-export default function AnimalForm() {
-  // Imperative navigation helper (back after save).
-  const nav = useNavigation<any>();
-  // Access route params (e.g., optional `id` in edit mode).
-  const route = useRoute<Props>();
-  // Local component state mirrors the Animal shape for the form.
-  const [id, setId] = useState<string | undefined>(route.params?.id);
-  const [tag, setTag] = useState('');
-  const [sex, setSex] = useState<'M'|'F'>('F');
-  const [breed, setBreed] = useState('');
-  const [birthDate, setBirthDate] = useState('');
+function Segmented<T extends string>({
+  value, options, onChange,
+}: { value: T; options: { label: string; value: T }[]; onChange: (v: T) => void }) {
+  return (
+    <View style={{ flexDirection: 'row', gap: 8 }}>
+      {options.map(opt => {
+        const active = value === opt.value;
+        return (
+          <Pressable
+            key={opt.value}
+            onPress={() => onChange(opt.value)}
+            style={{
+              paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10,
+              borderWidth: 1, borderColor: active ? '#2563eb' : '#d1d5db',
+              backgroundColor: active ? '#dbeafe' : '#fff'
+            }}
+          >
+            <Text style={{ fontWeight: active ? '700' : '500' }}>{opt.label}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
 
-  // On mount (and when `id` changes), load the existing record for editing.
+export default function AnimalForm() {
+  const nav = useNavigation<any>();
+  const route = useRoute<Props>();
+  const [id] = useState<string | undefined>(route.params?.id);
+
+  // Campos principais
+  const [tag, setTag] = useState('');
+  const [type, setType] = useState<AnimalType>('BEZERRO');
+  const [sex, setSex] = useState<Sex>('F');
+  const [breed, setBreed] = useState('');
+  const [origin, setOrigin] = useState('');
+  const [birthDate, setBirthDate] = useState('');
+  const [weightKg, setWeightKg] = useState<string>(''); // mantemos como string e convertemos no save
+  const [sireTag, setSireTag] = useState('');
+  const [damTag, setDamTag] = useState('');
+  const [notes, setNotes] = useState('');
+
   useEffect(() => {
-    async function load() {
+    (async () => {
       if (!id) return;
-      const rows = await getAll<Animal>('SELECT * FROM animals WHERE id = ?', [id]);
-      if (rows.length) {
-        const a = rows[0];
-        setTag(a.tag);
-        setSex((a.sex as 'M'|'F') ?? 'F');
-        setBreed(a.breed ?? '');
-        setBirthDate(a.birthDate ?? '');
-      }
-    }
-    load();
+      const a = await getAnimalById(id);
+      if (!a) return;
+      setTag(a.tag);
+      setType(a.type);
+      setSex(a.sex);
+      setBreed(a.breed ?? '');
+      setOrigin(a.origin ?? '');
+      setBirthDate(a.birthDate ?? '');
+      setWeightKg(a.weightKg != null ? String(a.weightKg) : '');
+      setSireTag(a.sireTag ?? '');
+      setDamTag(a.damTag ?? '');
+      setNotes(a.notes ?? '');
+    })();
   }, [id]);
 
-  // Persist the form as a create/update operation.
   async function save() {
-    // Simple validation: require identification/tag.
     if (!tag.trim()) {
-      Alert.alert('Validação', 'Informe a identificação (brinco).');
+      Alert.alert('Validação', 'Informe a identificação (Nº Brinco).');
       return;
     }
-    // Delegate persistence to the repository; it normalizes fields and versioning.
-    await upsertAnimal({ id, tag: tag.trim(), sex, breed: breed || undefined, birthDate: birthDate || undefined });
-    // Navigate back to the previous screen once saved.
+    const weight = weightKg.trim() ? Number(weightKg) : undefined;
+    if (weightKg.trim() && Number.isNaN(weight)) {
+      Alert.alert('Validação', 'Peso deve ser numérico (kg).');
+      return;
+    }
+
+    await upsertAnimal({
+      id, tag: tag.trim(), type, sex,
+      breed: breed || undefined,
+      origin: origin || undefined,
+      birthDate: birthDate || undefined,
+      weightKg: weight,
+      sireTag: sireTag || undefined,
+      damTag: damTag || undefined,
+      notes: notes || undefined,
+    });
     nav.goBack();
   }
 
-  // Simple, inline-styled form. Consider extracting to styled components later.
   return (
     <View style={{ flex: 1, padding: 16, gap: 12 }}>
       <View>
-        <Text style={{ fontWeight: '600', marginBottom: 6 }}>Identificação</Text>
+        <Text style={{ fontWeight: '600', marginBottom: 6 }}>Nº Brinco</Text>
         <TextInput
-          placeholder="Brinco/Tag"
+          placeholder="Identificação (tag)"
           value={tag}
           onChangeText={setTag}
           style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 10, padding: 10 }}
@@ -92,13 +104,28 @@ export default function AnimalForm() {
       </View>
 
       <View>
-        <Text style={{ fontWeight: '600', marginBottom: 6 }}>Sexo (M/F)</Text>
-        <TextInput
-          placeholder="F ou M"
+        <Text style={{ fontWeight: '600', marginBottom: 6 }}>Tipo</Text>
+        <Segmented
+          value={type}
+          onChange={setType}
+          options={[
+            { label: 'Bezerro', value: 'BEZERRO' },
+            { label: 'Novilho', value: 'NOVILHO' },
+            { label: 'Matriz',  value: 'MATRIZ'  },
+            { label: 'Engorda', value: 'ENGORDA' },
+          ]}
+        />
+      </View>
+
+      <View>
+        <Text style={{ fontWeight: '600', marginBottom: 6 }}>Sexo</Text>
+        <Segmented
           value={sex}
-          onChangeText={(v) => setSex((v.trim().toUpperCase() === 'M') ? 'M' : 'F')}
-          autoCapitalize="characters"
-          style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 10, padding: 10 }}
+          onChange={setSex}
+          options={[
+            { label: 'Fêmea', value: 'F' },
+            { label: 'Macho', value: 'M' },
+          ]}
         />
       </View>
 
@@ -113,12 +140,65 @@ export default function AnimalForm() {
       </View>
 
       <View>
-        <Text style={{ fontWeight: '600', marginBottom: 6 }}>Nascimento (ISO opcional)</Text>
+        <Text style={{ fontWeight: '600', marginBottom: 6 }}>Origem (opcional)</Text>
+        <TextInput
+          placeholder="Compra / Nascimento / Transferência..."
+          value={origin}
+          onChangeText={setOrigin}
+          style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 10, padding: 10 }}
+        />
+      </View>
+
+      <View>
+        <Text style={{ fontWeight: '600', marginBottom: 6 }}>Nascimento (YYYY-MM-DD)</Text>
         <TextInput
           placeholder="YYYY-MM-DD"
           value={birthDate}
           onChangeText={setBirthDate}
           style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 10, padding: 10 }}
+        />
+      </View>
+
+      <View>
+        <Text style={{ fontWeight: '600', marginBottom: 6 }}>Peso (kg)</Text>
+        <TextInput
+          placeholder="Ex.: 340"
+          value={weightKg}
+          onChangeText={setWeightKg}
+          keyboardType="numeric"
+          style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 10, padding: 10 }}
+        />
+      </View>
+
+      <View style={{ flexDirection: 'row', gap: 12 }}>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontWeight: '600', marginBottom: 6 }}>Brinco Pai</Text>
+          <TextInput
+            placeholder="Ex.: P-001"
+            value={sireTag}
+            onChangeText={setSireTag}
+            style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 10, padding: 10 }}
+          />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontWeight: '600', marginBottom: 6 }}>Brinco Mãe</Text>
+          <TextInput
+            placeholder="Ex.: M-001"
+            value={damTag}
+            onChangeText={setDamTag}
+            style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 10, padding: 10 }}
+          />
+        </View>
+      </View>
+
+      <View>
+        <Text style={{ fontWeight: '600', marginBottom: 6 }}>Observação</Text>
+        <TextInput
+          placeholder="Notas gerais"
+          value={notes}
+          onChangeText={setNotes}
+          multiline
+          style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 10, padding: 10, minHeight: 80 }}
         />
       </View>
 

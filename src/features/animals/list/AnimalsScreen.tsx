@@ -1,64 +1,63 @@
-/**
- * AnimalsScreen (list & navigation)
- * -----------------------------------------------------------------------------
- * PURPOSE
- *  - Display the list of animals ordered by most recently updated (repo handles).
- *  - Provide entry points to create a new animal or edit an existing one.
- *
- * DATA FLOW
- *  - `initDb()` ensures the SQLite schema exists on native before listing.
- *  - `listAnimals()` abstracts persistence (SQLite on native, localStorage on web).
- *  - Local state `items` holds the current list to render.
- *
- * LIFECYCLE
- *  - `useEffect(..., [])` loads once when the screen mounts.
- *  - `useFocusEffect` loads again whenever the screen regains focus (e.g., after
- *     returning from the form), keeping the list fresh without manual refresh.
- *
- * RENDERING & PERFORMANCE
- *  - Uses `FlashList` (Shopify) for efficient large lists in React Native.
- *  - `estimatedItemSize` helps FlashList precompute layouts for smooth scrolling.
- *
- * UX
- *  - Primary action: "+ Novo animal" opens the AnimalForm in creation mode.
- *  - Each list row navigates to AnimalForm with the selected `id` for editing.
- *  - Empty state message is shown when there are no animals.
- *
- * Last reviewed: 2025-09-04
- */
-
-import React from 'react';
-import { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { View, Text, Pressable } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
-// Repository read op (backend-agnostic: SQLite/native, localStorage/web)
 import { listAnimals } from '@/data/animal.repo';
 import type { Animal } from '@/domain/animal';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-// Ensures DB schema exists before any queries on native platforms.
 import { initDb } from '@/core/db/sqlite';
+import BottomNav from '@/ui/components/BottomNav';
+
+function ageFrom(birth?: string): string {
+  if (!birth) return '-';
+  const d = new Date(birth + (birth.length === 10 ? 'T00:00:00Z' : ''));
+  if (Number.isNaN(d.getTime())) return '-';
+  const now = new Date();
+  let years = now.getUTCFullYear() - d.getUTCFullYear();
+  let months = now.getUTCMonth() - d.getUTCMonth();
+  if (months < 0) { years -= 1; months += 12; }
+  if (years <= 0 && months <= 0) return '0m';
+  return years > 0 ? `${years}a ${months}m` : `${months}m`;
+}
+
+function fmtDate(iso?: string): string {
+  if (!iso) return '-';
+  const d = new Date(iso + (iso.length === 10 ? 'T00:00:00Z' : ''));
+  if (Number.isNaN(d.getTime())) return '-';
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const yyyy = d.getUTCFullYear();
+  return `${dd}/${mm}/${yyyy}`;
+}
 
 export default function AnimalsScreen() {
-  // Local state with the currently loaded animals.
   const [items, setItems] = useState<Animal[]>([]);
-  // Imperative navigation helper.
   const nav = useNavigation<any>();
 
-  // Load routine: ensure schema, then fetch list, then update UI state.
   async function load() {
-    await initDb(); // garante schema
+    await initDb();
     const data = await listAnimals();
     setItems(data);
   }
 
-  // Initial load on mount.
   useEffect(() => { load(); }, []);
-  // Reload whenever screen regains focus (e.g., after save on form screen).
   useFocusEffect(useCallback(() => { load(); }, []));
+
+  const header = useMemo(() => (
+    <View style={{ paddingVertical: 8 }}>
+      <Text style={{ fontWeight: '700', marginBottom: 8 }}>Lista de Animais</Text>
+      <View style={{
+        backgroundColor: '#f3f4f6', borderWidth: 1, borderColor: '#e5e7eb',
+        borderRadius: 10, padding: 8
+      }}>
+        <Text style={{ color: '#6b7280', fontSize: 12 }}>
+          Colunas: Brinco • Tipo • Sexo • Raça • Origem • Nascimento • Idade • Peso • Brinco Pai • Brinco Mãe
+        </Text>
+      </View>
+    </View>
+  ), []);
 
   return (
     <View style={{ flex: 1, padding: 16, gap: 12 }}>
-      {/* New item CTA: navigates to the form without an id (create mode). */}
       <Pressable
         onPress={() => nav.navigate('AnimalForm')}
         style={({ pressed }) => ({
@@ -70,15 +69,14 @@ export default function AnimalsScreen() {
       </Pressable>
 
       {items.length === 0 ? (
-        // Empty state: centered, subtle hint.
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <Text style={{ color: '#6b7280' }}>Nenhum animal cadastrado.</Text>
         </View>
       ) : (
-        // Efficient list for RN. Each row is tappable to edit the item.
         <FlashList
           data={items}
           keyExtractor={(it) => it.id}
+          ListHeaderComponent={header}
           renderItem={({ item }) => (
             <Pressable
               onPress={() => nav.navigate('AnimalForm', { id: item.id })}
@@ -88,12 +86,30 @@ export default function AnimalsScreen() {
                 borderWidth: 1, borderColor: '#e5e7eb'
               })}
             >
-              <Text style={{ fontWeight: '700' }}>{item.tag}</Text>
-              <Text style={{ color: '#6b7280' }}>{item.sex}{item.breed ? ` • ${item.breed}` : ''}</Text>
+              {/* Linha 1: Brinco • Tipo • Sexo • Raça */}
+              <Text style={{ fontWeight: '700' }}>
+                {item.tag}
+                <Text style={{ fontWeight: '400', color: '#6b7280' }}>
+                  {`  •  ${item.type ?? '-'}  •  ${item.sex ?? '-'}  •  ${item.breed ?? '-'}`}
+                </Text>
+              </Text>
+
+              {/* Linha 2: Origem • Nascimento • Idade • Peso */}
+              <Text style={{ color: '#374151' }}>
+                {`${item.origin ?? '-'}  •  ${fmtDate(item.birthDate)}  •  ${ageFrom(item.birthDate)}  •  ${item.weightKg != null ? `${item.weightKg} kg` : '-'}`}
+              </Text>
+
+              {/* Linha 3: Brinco Pai • Brinco Mãe */}
+              <Text style={{ color: '#6b7280' }}>
+                {`Pai: ${item.sireTag ?? '-'}   •   Mãe: ${item.damTag ?? '-'}`}
+              </Text>
             </Pressable>
           )}
         />
       )}
+
+      {/* Navegação inferior simples */}
+      <BottomNav />
     </View>
   );
 }
