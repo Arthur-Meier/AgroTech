@@ -1,48 +1,77 @@
 import React from 'react';
-import { View, Text, Pressable } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { StyleSheet, Text, View } from 'react-native';
+import { useNavigation, useRoute } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import type { RootStackParamList } from '@/app/navigation';
+import { useAppTheme } from '@/core/theme/useAppTheme';
+import { t } from '@/core/i18n/strings';
+import AppButton from '@/ui/components/AppButton';
+
+type Nav = {
+  navigate: (screen: keyof RootStackParamList) => void;
+};
 
 export default function BottomNav() {
-  const nav = useNavigation<any>();
+  const navigation = useNavigation<Nav>();
+  const route = useRoute();
+  const insets = useSafeAreaInsets();
+  const theme = useAppTheme();
+
   return (
-    <View style={{
-      borderTopWidth: 1, borderColor: '#e5e7eb', paddingTop: 10, marginTop: 6
-    }}>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
-        <Pressable
-          onPress={() => nav.navigate('Animals')}
-          style={({ pressed }) => ({
-            flex: 1, padding: 12, borderRadius: 12,
-            borderWidth: 1, borderColor: '#e5e7eb',
-            backgroundColor: pressed ? '#f3f4f6' : '#fff', alignItems: 'center'
-          })}
-        >
-          <Text style={{ fontWeight: '600' }}>Animais</Text>
-        </Pressable>
-
-        <Pressable
-          onPress={() => nav.navigate('AnimalForm')}
-          style={({ pressed }) => ({
-            flex: 1, padding: 12, borderRadius: 12,
-            borderWidth: 1, borderColor: '#e5e7eb',
-            backgroundColor: pressed ? '#eef2ff' : '#eef2ff', alignItems: 'center'
-          })}
-        >
-          <Text style={{ fontWeight: '700' }}>Cadastrar</Text>
-        </Pressable>
-
-        {/* Espaços para telas futuras */}
-        <Pressable
-          onPress={() => {}}
-          style={{
-            flex: 1, padding: 12, borderRadius: 12,
-            borderWidth: 1, borderColor: '#e5e7eb',
-            backgroundColor: '#fff', alignItems: 'center', opacity: 0.5
-          }}
-        >
-          <Text>Relatórios</Text>
-        </Pressable>
+    <View
+      style={[
+        styles.wrapper,
+        {
+          borderColor: theme.colors.border,
+          backgroundColor: theme.colors.surface,
+          paddingBottom: Math.max(insets.bottom, 10),
+        },
+      ]}
+    >
+      <View style={styles.row}>
+        <AppButton
+          label={t('app.animals')}
+          onPress={() => navigation.navigate('Animals')}
+          kind={route.name === 'Animals' ? 'primary' : 'secondary'}
+          style={styles.navButton}
+        />
+        <AppButton
+          label={t('app.newAnimal')}
+          onPress={() => navigation.navigate('AnimalForm')}
+          kind={route.name === 'AnimalForm' ? 'primary' : 'secondary'}
+          style={styles.navButton}
+        />
+        <AppButton
+          label={t('app.settings')}
+          onPress={() => navigation.navigate('Settings')}
+          kind={route.name === 'Settings' ? 'primary' : 'secondary'}
+          style={styles.navButton}
+        />
       </View>
+      <Text style={[styles.caption, { color: theme.colors.textMuted }]}>Mobile-first offline MVP</Text>
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  wrapper: {
+    borderTopWidth: 1,
+    paddingTop: 10,
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  row: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  caption: {
+    fontSize: 11,
+    textAlign: 'center',
+  },
+  navButton: {
+    flex: 1,
+    minWidth: 0,
+    paddingHorizontal: 8,
+  },
+});

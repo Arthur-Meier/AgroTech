@@ -1,36 +1,62 @@
-# PVF — Expo/React Native Skeleton
+# AgroTec Mobile MVP (Expo + React Native)
 
-Este esqueleto contém a estrutura base (src/*) e alguns arquivos de config
-para você colar em um projeto Expo TypeScript criado via:
+Offline-first mobile app for animal registration and field operations.
+This repository is aligned with AgroTec Notion scope (PVF sprint items).
 
-```powershell
-npx create-expo-app@latest pvf -t expo-template-blank-typescript
+## Tech stack
+- Expo SDK 53 + React Native 0.79
+- TypeScript (strict)
+- React Navigation (native stack)
+- SQLite (`expo-sqlite`) for local persistence
+- FlashList for mobile list performance
+
+## Project architecture
+- `src/app`: app bootstrap and navigation
+- `src/core`: cross-cutting concerns (db, theme, i18n, compliance, analytics, export)
+- `src/domain`: domain types
+- `src/data`: repositories and persistence mapping
+- `src/features`: feature screens (animals, paywall, settings, compliance)
+- `src/ui`: reusable UI components
+- `docs`: product/compliance/process artifacts
+
+## Implemented scope highlights
+- Animals list + create/edit form (offline)
+- SQLite schema + additive migration strategy
+- Mobile-first list/form states (loading, empty, error)
+- Theme tokens with system light/dark support
+- i18n dictionary baseline (`pt-BR` with fallback)
+- Entitlement model + feature gating (free/pro stub)
+- Paywall stub with analytics events
+- Consent flow (LGPD) and privacy policy linkage
+- CSV export flow (share/download)
+- Sentry-ready crash capture (enabled with `EXPO_PUBLIC_SENTRY_DSN`)
+- Engineering quality baseline (lint, tests, CI, Husky)
+
+## Scripts
+```bash
+npm run start
+npm run typecheck
+npm run lint
+npm run test
+npm run test:coverage
+npm run format
 ```
 
-Depois, copie todo o conteúdo deste ZIP por cima da pasta do projeto criado
-(aceite substituir arquivos quando necessário).
+## Quality and CI
+- ESLint + Prettier
+- Jest test suite for repository behavior
+- GitHub Actions workflow: typecheck + lint + coverage
+- Husky pre-commit hook: lint + tests
 
-## Estrutura
+## iOS distribution (EAS)
+- Config file: `eas.json`
+- Runbook: `docs/ios-distribution.md`
 
-- `src/app` — bootstrap (providers, tema, navegação)
-- `src/core` — infraestrutura (db/sqlite, iap/entitlements, http)
-- `src/domain` — tipos e portas do domínio
-- `src/data` — repositórios concretos
-- `src/features` — módulos de features (animals/* como exemplo)
-- `src/ui` — design system básico
-- `App.tsx` — exporta `src/app` como entrada do Expo
-- `app.json`, `babel.config.js`, `tsconfig.json` — configs essenciais
+## Compliance artifacts
+- Privacy policy draft: `docs/privacy-policy.md`
+- QA checklist: `docs/qa-checklist.md`
 
-## Telas incluídas (exemplo)
-- Lista de Animais (offline) — `features/animals/list/AnimalsScreen.tsx`
-- Formulário de Animal — `features/animals/form/AnimalForm.tsx`
-
-## Próximos passos resumidos
-1) Criar o app (Expo + TS)
-2) Copiar os arquivos deste ZIP
-3) Instalar dependências (ver instruções no chat)
-4) `npx expo start`
-
-
-para rodar o projeto
--> npx expo start --web --clear
+## Notes before production
+- Replace placeholder privacy URL in `app.json`.
+- Replace `ascAppId` in `eas.json`.
+- Wire real billing provider and set `EXPO_PUBLIC_SENTRY_DSN`.

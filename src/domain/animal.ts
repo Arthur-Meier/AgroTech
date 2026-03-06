@@ -1,41 +1,48 @@
 /**
- * Animal domain model (Cadastro)
- * - Campos alinhados ao seu "Cadastro" + alguns auxiliares de ciclo de vida.
- * - Datas em ISO (YYYY-MM-DD para datas simples; timestamps completos quando preciso).
+ * Domain model for the AgroTec animal registry.
+ *
+ * Dates are stored as ISO calendar strings (`YYYY-MM-DD`) and `updatedAt`
+ * uses full ISO datetime.
  */
 export type AnimalId = string;
-export type Sex = 'M' | 'F'; // Macho/Fêmea
+
+export type Sex = 'M' | 'F';
 export type AnimalType = 'BEZERRO' | 'NOVILHO' | 'MATRIZ' | 'ENGORDA';
+
+export const ANIMAL_ORIGIN_VALUES = ['BIRTH', 'PURCHASE', 'TRANSFER'] as const;
+export type AnimalOrigin = (typeof ANIMAL_ORIGIN_VALUES)[number];
 
 export interface Animal {
   id: AnimalId;
 
-  // Cadastro básico
-  tag: string;                 // Nº Brinco
-  type: AnimalType;            // Bezerro | Novilho | Matriz | Engorda (para abate)
-  sex: Sex;                    // M | F
-  breed?: string;              // Raça
-  origin?: string;             // Origem (ex.: Compra, Nascimento, Transferência)
-  lot?: string;                // Lote
-  pasture?: string;            // Pasto
-  purchaseDate?: string;       // Data da Compra (YYYY-MM-DD)
-  birthDate?: string;          // Data de Nascimento (YYYY-MM-DD)
-  weightKg?: number;           // Peso (kg)
-  priceValue?: number;         // Valor (R$)
-  supplier?: string;           // Fornecedor
-  weaningDate?: string;        // Data Desmama
-  saleDate?: string;           // Data de Venda
-  buyer?: string;              // Comprador
-  sireTag?: string;            // Brinco Pai
-  damTag?: string;             // Brinco Mãe
-  causeMortis?: string;        // Causa Mortis
-  notes?: string;              // Observação
+  // Base registry
+  tag: string;
+  type: AnimalType;
+  sex: Sex;
+  breed?: string;
+  origin?: AnimalOrigin | string;
+  lot?: string;
+  pasture?: string;
+  purchaseDate?: string;
+  birthDate?: string;
+  weightKg?: number;
+  priceValue?: number;
+  supplier?: string;
+  weaningDate?: string;
+  saleDate?: string;
+  buyer?: string;
 
-  // Auxiliares de regra/etapas (opcionais – para futuras automações)
-  pastureStartDate?: string;       // quando virou Novilho (inicio do pasto)
-  confinementStartDate?: string;   // quando entrou no confinamento (100 dias)
+  // Parent references
+  sireTag?: string;
+  damTag?: string;
 
-  // Sistema
-  updatedAt: string;   // timestamp ISO (UTC recomendado)
-  version: number;     // controle otimista
+  // Optional lifecycle fields
+  causeMortis?: string;
+  notes?: string;
+  pastureStartDate?: string;
+  confinementStartDate?: string;
+
+  // System metadata
+  updatedAt: string;
+  version: number;
 }

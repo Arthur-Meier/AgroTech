@@ -1,216 +1,526 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, TextInput, Pressable, Alert } from 'react-native';
-import { upsertAnimal, getAnimalById } from '@/data/animal.repo';
-import type { Sex, AnimalType, Animal } from '@/domain/animal';
-import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  Alert,
+  Keyboard,
+  Platform,
+  Pressable,
+  StyleProp,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  ViewStyle,
+} from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import { Picker } from '@react-native-picker/picker';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import type { RootStackParamList } from '@/app/navigation';
+import { countAnimals, getAnimalById, listAnimals, upsertAnimal } from '@/data/animal.repo';
+import type { Animal, AnimalOrigin, AnimalType, Sex } from '@/domain/animal';
+import { useAppTheme } from '@/core/theme/useAppTheme';
+import { t } from '@/core/i18n/strings';
+import { useEntitlement } from '@/core/iap/entitlements';
+import { canCreateAnimal } from '@/core/product/limits';
+import { captureError } from '@/core/observability/sentry';
+import AppButton from '@/ui/components/AppButton';
 
-type Props = RouteProp<RootStackParamList, 'AnimalForm'>;
+type FormRoute = RouteProp<RootStackParamList, 'AnimalForm'>;
+type Navigation = NativeStackNavigationProp<RootStackParamList>;
+
+const ORIGIN_OPTIONS: { labelKey: string; value: AnimalOrigin }[] = [
+  { labelKey: 'animalForm.origin.option.birth', value: 'BIRTH' },
+  { labelKey: 'animalForm.origin.option.purchase', value: 'PURCHASE' },
+  { labelKey: 'animalForm.origin.option.transfer', value: 'TRANSFER' },
+];
+
+function normalizeOrigin(input?: string): AnimalOrigin {
+  const normalized = input?.trim().toUpperCase();
+  if (normalized === 'BIRTH' || normalized === 'NASCIMENTO') return 'BIRTH';
+  if (normalized === 'TRANSFER' || normalized === 'TRANSFERENCIA') return 'TRANSFER';
+  return 'PURCHASE';
+}
+
+function isIsoDate(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function toIsoDate(value: Date): string {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function parseIsoDate(value?: string): Date | null {
+  if (!value || !isIsoDate(value)) return null;
+  const parsed = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+}
 
 function Segmented<T extends string>({
-  value, options, onChange,
-}: { value: T; options: { label: string; value: T }[]; onChange: (v: T) => void }) {
+  value,
+  options,
+  onChange,
+}: {
+  value: T;
+  options: { label: string; value: T }[];
+  onChange: (value: T) => void;
+}) {
   return (
-    <View style={{ flexDirection: 'row', gap: 8 }}>
-      {options.map(opt => {
-        const active = value === opt.value;
+    <View style={styles.segmentRow}>
+      {options.map((option) => {
+        const active = option.value === value;
         return (
-          <Pressable
-            key={opt.value}
-            onPress={() => onChange(opt.value)}
-            style={{
-              paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10,
-              borderWidth: 1, borderColor: active ? '#2563eb' : '#d1d5db',
-              backgroundColor: active ? '#dbeafe' : '#fff'
-            }}
-          >
-            <Text style={{ fontWeight: active ? '700' : '500' }}>{opt.label}</Text>
-          </Pressable>
+          <AppButton
+            key={option.value}
+            label={option.label}
+            onPress={() => onChange(option.value)}
+            kind={active ? 'primary' : 'secondary'}
+            style={styles.segmentItem}
+          />
         );
       })}
     </View>
   );
 }
 
-export default function AnimalForm() {
-  const nav = useNavigation<any>();
-  const route = useRoute<Props>();
-  const [id] = useState<string | undefined>(route.params?.id);
+function Field({
+  label,
+  children,
+  containerStyle,
+}: {
+  label: string;
+  children: React.ReactNode;
+  containerStyle?: StyleProp<ViewStyle>;
+}) {
+  const theme = useAppTheme();
+  return (
+    <View style={containerStyle}>
+      <Text style={[styles.fieldLabel, { color: theme.colors.text }]}>{label}</Text>
+      {children}
+    </View>
+  );
+}
 
-  // Campos principais
+function Input({
+  multiline = false,
+  style,
+  ...props
+}: React.ComponentProps<typeof TextInput> & { multiline?: boolean }) {
+  const theme = useAppTheme();
+
+  return (
+    <TextInput
+      placeholderTextColor={theme.colors.textMuted}
+      style={[
+        styles.input,
+        {
+          backgroundColor: theme.colors.surface,
+          borderColor: theme.colors.border,
+          color: theme.colors.text,
+          minHeight: multiline ? 96 : undefined,
+          textAlignVertical: multiline ? 'top' : 'center',
+        },
+        style,
+      ]}
+      multiline={multiline}
+      {...props}
+    />
+  );
+}
+
+function SelectInput({
+  value,
+  onChange,
+  options,
+  placeholder,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  options: { label: string; value: string }[];
+  placeholder?: string;
+}) {
+  const theme = useAppTheme();
+
+  return (
+    <View
+      style={[
+        styles.selectContainer,
+        {
+          backgroundColor: theme.colors.surface,
+          borderColor: theme.colors.border,
+        },
+      ]}
+    >
+      <Picker selectedValue={value} onValueChange={(nextValue) => onChange(String(nextValue))}>
+        <Picker.Item label={placeholder ?? t('animalForm.parent.placeholder')} value="" />
+        {options.map((option) => (
+          <Picker.Item key={option.value} label={option.label} value={option.value} />
+        ))}
+      </Picker>
+    </View>
+  );
+}
+
+export default function AnimalForm() {
+  const theme = useAppTheme();
+  const navigation = useNavigation<Navigation>();
+  const route = useRoute<FormRoute>();
+  const insets = useSafeAreaInsets();
+  const { entitlement } = useEntitlement();
+
+  const id = route.params?.id;
+  const isEditing = Boolean(id);
+
+  const [loading, setLoading] = useState(isEditing);
+  const [saving, setSaving] = useState(false);
+  const [showBirthDatePicker, setShowBirthDatePicker] = useState(false);
+
+  // Parent candidates are loaded from existing records and filtered by sex.
+  const [availableAnimals, setAvailableAnimals] = useState<Animal[]>([]);
+
   const [tag, setTag] = useState('');
   const [type, setType] = useState<AnimalType>('BEZERRO');
   const [sex, setSex] = useState<Sex>('F');
   const [breed, setBreed] = useState('');
-  const [origin, setOrigin] = useState('');
+  const [origin, setOrigin] = useState<AnimalOrigin>('PURCHASE');
   const [birthDate, setBirthDate] = useState('');
-  const [weightKg, setWeightKg] = useState<string>(''); // mantemos como string e convertemos no save
+  const [weightKg, setWeightKg] = useState('');
   const [sireTag, setSireTag] = useState('');
   const [damTag, setDamTag] = useState('');
   const [notes, setNotes] = useState('');
 
+  const birthDateValue = useMemo(() => parseIsoDate(birthDate) ?? new Date(), [birthDate]);
+
   useEffect(() => {
+    let mounted = true;
+
     (async () => {
-      if (!id) return;
-      const a = await getAnimalById(id);
-      if (!a) return;
-      setTag(a.tag);
-      setType(a.type);
-      setSex(a.sex);
-      setBreed(a.breed ?? '');
-      setOrigin(a.origin ?? '');
-      setBirthDate(a.birthDate ?? '');
-      setWeightKg(a.weightKg != null ? String(a.weightKg) : '');
-      setSireTag(a.sireTag ?? '');
-      setDamTag(a.damTag ?? '');
-      setNotes(a.notes ?? '');
+      try {
+        const [animals, existingAnimal] = await Promise.all([
+          listAnimals(),
+          id ? getAnimalById(id) : Promise.resolve(undefined),
+        ]);
+
+        if (!mounted) return;
+
+        setAvailableAnimals(animals.filter((animal) => animal.id !== id));
+
+        if (!existingAnimal) {
+          setLoading(false);
+          return;
+        }
+
+        setTag(existingAnimal.tag);
+        setType(existingAnimal.type);
+        setSex(existingAnimal.sex);
+        setBreed(existingAnimal.breed ?? '');
+        setOrigin(normalizeOrigin(existingAnimal.origin));
+        setBirthDate(existingAnimal.birthDate ?? '');
+        setWeightKg(existingAnimal.weightKg != null ? String(existingAnimal.weightKg) : '');
+        setSireTag(existingAnimal.sireTag ?? '');
+        setDamTag(existingAnimal.damTag ?? '');
+        setNotes(existingAnimal.notes ?? '');
+      } catch (error) {
+        captureError(error, { scope: 'animal_form_prefill' });
+        Alert.alert(t('validation.title'), t('animals.error.load'));
+      } finally {
+        if (mounted) setLoading(false);
+      }
     })();
+
+    return () => {
+      mounted = false;
+    };
   }, [id]);
+
+  const maleParentOptions = useMemo(
+    () => availableAnimals.filter((animal) => animal.sex === 'M').map((animal) => ({ label: animal.tag, value: animal.tag })),
+    [availableAnimals]
+  );
+
+  const femaleParentOptions = useMemo(
+    () => availableAnimals.filter((animal) => animal.sex === 'F').map((animal) => ({ label: animal.tag, value: animal.tag })),
+    [availableAnimals]
+  );
+
+  const isBirthOrigin = origin === 'BIRTH';
+
+  const contentPaddingBottom = useMemo(() => insets.bottom + 24, [insets.bottom]);
+
+  function onBirthDateChange(event: DateTimePickerEvent, nextDate?: Date) {
+    if (Platform.OS === 'android') {
+      setShowBirthDatePicker(false);
+      if (event.type === 'dismissed') return;
+    }
+
+    if (nextDate) {
+      setBirthDate(toIsoDate(nextDate));
+    }
+  }
 
   async function save() {
     if (!tag.trim()) {
-      Alert.alert('Validação', 'Informe a identificação (Nº Brinco).');
-      return;
-    }
-    const weight = weightKg.trim() ? Number(weightKg) : undefined;
-    if (weightKg.trim() && Number.isNaN(weight)) {
-      Alert.alert('Validação', 'Peso deve ser numérico (kg).');
+      Alert.alert(t('validation.title'), t('animalForm.validation.tag'));
       return;
     }
 
-    await upsertAnimal({
-      id, tag: tag.trim(), type, sex,
-      breed: breed || undefined,
-      origin: origin || undefined,
-      birthDate: birthDate || undefined,
-      weightKg: weight,
-      sireTag: sireTag || undefined,
-      damTag: damTag || undefined,
-      notes: notes || undefined,
-    });
-    nav.goBack();
+    if (birthDate.trim() && !isIsoDate(birthDate.trim())) {
+      Alert.alert(t('validation.title'), t('animalForm.validation.birthDate'));
+      return;
+    }
+
+    const normalizedWeight = weightKg.trim() ? Number(weightKg) : undefined;
+    if (weightKg.trim() && Number.isNaN(normalizedWeight)) {
+      Alert.alert(t('validation.title'), t('animalForm.validation.weight'));
+      return;
+    }
+
+    if (isBirthOrigin) {
+      if (!sireTag.trim() || !damTag.trim()) {
+        Alert.alert(t('validation.title'), t('animalForm.validation.parentsRequired'));
+        return;
+      }
+
+      const sireExists = maleParentOptions.some((option) => option.value === sireTag);
+      const damExists = femaleParentOptions.some((option) => option.value === damTag);
+      if (!sireExists || !damExists) {
+        Alert.alert(t('validation.title'), t('animalForm.validation.parentsRequired'));
+        return;
+      }
+    }
+
+    if (!isEditing) {
+      const currentCount = await countAnimals();
+      if (!canCreateAnimal(entitlement, currentCount)) {
+        Alert.alert(t('validation.title'), t('animals.createBlocked'));
+        navigation.navigate('Paywall', { source: 'animal_form_save' });
+        return;
+      }
+    }
+
+    setSaving(true);
+    try {
+      await upsertAnimal({
+        id,
+        tag,
+        type,
+        sex,
+        breed,
+        origin,
+        birthDate,
+        weightKg: normalizedWeight,
+        sireTag,
+        damTag,
+        notes,
+      });
+
+      Alert.alert('OK', t('animalForm.saved'));
+      navigation.goBack();
+    } catch (error) {
+      captureError(error, { scope: 'animal_form_save' });
+      const message =
+        error instanceof Error && error.message === 'INVALID_DATE_FORMAT'
+          ? t('animalForm.validation.birthDate')
+          : t('animals.error.load');
+      Alert.alert(t('validation.title'), message);
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
-    <View style={{ flex: 1, padding: 16, gap: 12 }}>
-      <View>
-        <Text style={{ fontWeight: '600', marginBottom: 6 }}>Nº Brinco</Text>
-        <TextInput
-          placeholder="Identificação (tag)"
-          value={tag}
-          onChangeText={setTag}
-          style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 10, padding: 10 }}
-        />
-      </View>
-
-      <View>
-        <Text style={{ fontWeight: '600', marginBottom: 6 }}>Tipo</Text>
-        <Segmented
-          value={type}
-          onChange={setType}
-          options={[
-            { label: 'Bezerro', value: 'BEZERRO' },
-            { label: 'Novilho', value: 'NOVILHO' },
-            { label: 'Matriz',  value: 'MATRIZ'  },
-            { label: 'Engorda', value: 'ENGORDA' },
-          ]}
-        />
-      </View>
-
-      <View>
-        <Text style={{ fontWeight: '600', marginBottom: 6 }}>Sexo</Text>
-        <Segmented
-          value={sex}
-          onChange={setSex}
-          options={[
-            { label: 'Fêmea', value: 'F' },
-            { label: 'Macho', value: 'M' },
-          ]}
-        />
-      </View>
-
-      <View>
-        <Text style={{ fontWeight: '600', marginBottom: 6 }}>Raça (opcional)</Text>
-        <TextInput
-          placeholder="Ex.: Angus"
-          value={breed}
-          onChangeText={setBreed}
-          style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 10, padding: 10 }}
-        />
-      </View>
-
-      <View>
-        <Text style={{ fontWeight: '600', marginBottom: 6 }}>Origem (opcional)</Text>
-        <TextInput
-          placeholder="Compra / Nascimento / Transferência..."
-          value={origin}
-          onChangeText={setOrigin}
-          style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 10, padding: 10 }}
-        />
-      </View>
-
-      <View>
-        <Text style={{ fontWeight: '600', marginBottom: 6 }}>Nascimento (YYYY-MM-DD)</Text>
-        <TextInput
-          placeholder="YYYY-MM-DD"
-          value={birthDate}
-          onChangeText={setBirthDate}
-          style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 10, padding: 10 }}
-        />
-      </View>
-
-      <View>
-        <Text style={{ fontWeight: '600', marginBottom: 6 }}>Peso (kg)</Text>
-        <TextInput
-          placeholder="Ex.: 340"
-          value={weightKg}
-          onChangeText={setWeightKg}
-          keyboardType="numeric"
-          style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 10, padding: 10 }}
-        />
-      </View>
-
-      <View style={{ flexDirection: 'row', gap: 12 }}>
-        <View style={{ flex: 1 }}>
-          <Text style={{ fontWeight: '600', marginBottom: 6 }}>Brinco Pai</Text>
-          <TextInput
-            placeholder="Ex.: P-001"
-            value={sireTag}
-            onChangeText={setSireTag}
-            style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 10, padding: 10 }}
-          />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={{ fontWeight: '600', marginBottom: 6 }}>Brinco Mãe</Text>
-          <TextInput
-            placeholder="Ex.: M-001"
-            value={damTag}
-            onChangeText={setDamTag}
-            style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 10, padding: 10 }}
-          />
-        </View>
-      </View>
-
-      <View>
-        <Text style={{ fontWeight: '600', marginBottom: 6 }}>Observação</Text>
-        <TextInput
-          placeholder="Notas gerais"
-          value={notes}
-          onChangeText={setNotes}
-          multiline
-          style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 10, padding: 10, minHeight: 80 }}
-        />
-      </View>
-
-      <Pressable
-        onPress={save}
-        style={({ pressed }) => ({
-          backgroundColor: pressed ? '#2563eb' : '#3b82f6',
-          padding: 12, borderRadius: 12, alignSelf: 'flex-start'
-        })}
+    <SafeAreaView
+      style={[styles.safeArea, { backgroundColor: theme.colors.background }]}
+      edges={['top', 'left', 'right']}
+    >
+      <KeyboardAwareScrollView
+        enableOnAndroid
+        keyboardOpeningTime={0}
+        extraScrollHeight={16}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: contentPaddingBottom }]}
+        keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
       >
-        <Text style={{ color: 'white', fontWeight: '700' }}>{id ? 'Salvar' : 'Criar'}</Text>
-      </Pressable>
-    </View>
+        <Field label={t('animalForm.tag.label')}>
+          <Input value={tag} onChangeText={setTag} placeholder={t('animalForm.tag.placeholder')} returnKeyType="next" />
+        </Field>
+
+        <Field label={t('animalForm.type.label')}>
+          <Segmented
+            value={type}
+            onChange={setType}
+            options={[
+              { label: 'Bezerro', value: 'BEZERRO' },
+              { label: 'Novilho', value: 'NOVILHO' },
+              { label: 'Matriz', value: 'MATRIZ' },
+              { label: 'Engorda', value: 'ENGORDA' },
+            ]}
+          />
+        </Field>
+
+        <Field label={t('animalForm.sex.label')}>
+          <Segmented
+            value={sex}
+            onChange={setSex}
+            options={[
+              { label: 'Femea', value: 'F' },
+              { label: 'Macho', value: 'M' },
+            ]}
+          />
+        </Field>
+
+        <Field label={t('animalForm.breed.label')}>
+          <Input value={breed} onChangeText={setBreed} placeholder="Ex.: Angus" returnKeyType="next" />
+        </Field>
+
+        <Field label={t('animalForm.origin.label')}>
+          <SelectInput
+            value={origin}
+            onChange={(next) => setOrigin(normalizeOrigin(next))}
+            options={ORIGIN_OPTIONS.map((option) => ({
+              label: t(option.labelKey),
+              value: option.value,
+            }))}
+          />
+          <Text style={[styles.fieldHelp, { color: theme.colors.textMuted }]}> 
+            {isBirthOrigin ? t('animalForm.origin.help.birth') : t('animalForm.origin.help.external')}
+          </Text>
+        </Field>
+
+        <Field label={t('animalForm.birthDate.label')}>
+          <Pressable
+            onPress={() => {
+              Keyboard.dismiss();
+              setShowBirthDatePicker((current) => !current);
+            }}
+            style={[
+              styles.dateTrigger,
+              {
+                backgroundColor: theme.colors.surface,
+                borderColor: theme.colors.border,
+              },
+            ]}
+          >
+            <Text style={{ color: birthDate ? theme.colors.text : theme.colors.textMuted }}>
+              {birthDate || t('animalForm.birthDate.select')}
+            </Text>
+          </Pressable>
+
+          {showBirthDatePicker ? (
+            <DateTimePicker
+              value={birthDateValue}
+              mode="date"
+              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+              onChange={onBirthDateChange}
+            />
+          ) : null}
+        </Field>
+
+        <Field label={t('animalForm.weight.label')}>
+          <Input value={weightKg} onChangeText={setWeightKg} placeholder="Ex.: 340" keyboardType="numeric" />
+        </Field>
+
+        <View style={styles.doubleColumn}>
+          <Field label={t('animalForm.sireTag.label')} containerStyle={styles.columnField}>
+            {isBirthOrigin ? (
+              <>
+                <SelectInput value={sireTag} onChange={setSireTag} options={maleParentOptions} />
+                {maleParentOptions.length === 0 ? (
+                  <Text style={[styles.fieldHelp, { color: theme.colors.danger }]}>{t('animalForm.parent.noMale')}</Text>
+                ) : null}
+              </>
+            ) : (
+              <Input value={sireTag} onChangeText={setSireTag} placeholder="Ex.: P-001" />
+            )}
+          </Field>
+
+          <Field label={t('animalForm.damTag.label')} containerStyle={styles.columnField}>
+            {isBirthOrigin ? (
+              <>
+                <SelectInput value={damTag} onChange={setDamTag} options={femaleParentOptions} />
+                {femaleParentOptions.length === 0 ? (
+                  <Text style={[styles.fieldHelp, { color: theme.colors.danger }]}>{t('animalForm.parent.noFemale')}</Text>
+                ) : null}
+              </>
+            ) : (
+              <Input value={damTag} onChangeText={setDamTag} placeholder="Ex.: M-001" />
+            )}
+          </Field>
+        </View>
+
+        <Field label={t('animalForm.notes.label')}>
+          <Input value={notes} onChangeText={setNotes} placeholder="Notas gerais" multiline />
+        </Field>
+
+        <View style={styles.footerActions}>
+          <AppButton
+            label={isEditing ? t('app.save') : t('app.create')}
+            onPress={save}
+            loading={saving || loading}
+            fullWidth
+          />
+        </View>
+      </KeyboardAwareScrollView>
+    </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+  },
+  scrollContent: {
+    padding: 16,
+    gap: 12,
+  },
+  fieldLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 6,
+  },
+  fieldHelp: {
+    fontSize: 12,
+    marginTop: 6,
+  },
+  input: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    fontSize: 15,
+  },
+  selectContainer: {
+    borderWidth: 1,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  dateTrigger: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+  },
+  segmentRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  segmentItem: {
+    flex: 1,
+    minWidth: 120,
+  },
+  doubleColumn: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  columnField: {
+    flex: 1,
+  },
+  footerActions: {
+    marginTop: 4,
+  },
+});

@@ -1,37 +1,105 @@
-# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
-
-# dependencies
+# -----------------------------------------------------------------------------
+# Dependencies / package managers
+# -----------------------------------------------------------------------------
 node_modules/
+.pnpm-store/
+.npm/
 
-# Expo
+# Use only one lockfile strategy in the repo.
+# Keep package-lock.json if the project uses npm.
+# Ignore yarn lockfile if you decided to standardize on npm.
+yarn.lock
+
+# Yarn Berry / PnP
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+.pnp.*
+.parcel-cache/
+
+# -----------------------------------------------------------------------------
+# Expo / React Native
+# -----------------------------------------------------------------------------
 .expo/
+.expo-shared/
 dist/
 web-build/
 expo-env.d.ts
 
-# Native
-.kotlin/
+# Native generated folders (ignore only if this is a managed Expo app and
+# android/ios are generated, not hand-maintained)
+android/
+ios/
+
+# Local Expo / EAS files
+*.expo.ts
+.eas/
+eas-debug.log
+
+# -----------------------------------------------------------------------------
+# Build / test / tooling artifacts
+# -----------------------------------------------------------------------------
+coverage/
+.jest/
+jest-cache/
+*.tsbuildinfo
+*.orig
 *.orig.*
+tmp/
+temp/
+
+# -----------------------------------------------------------------------------
+# Logs
+# -----------------------------------------------------------------------------
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# -----------------------------------------------------------------------------
+# Secrets / signing / local environment
+# -----------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# App signing / certificates / provisioning
 *.jks
+*.keystore
 *.p8
 *.p12
 *.key
 *.mobileprovision
-
-# Metro
-.metro-health-check*
-
-# debug
-npm-debug.*
-yarn-debug.*
-yarn-error.*
-
-# macOS
-.DS_Store
 *.pem
+*.cer
 
-# local env files
-.env*.local
+# Service account / credentials
+google-services.json
+GoogleService-Info.plist
+service-account*.json
+firebase-admin*.json
 
-# typescript
-*.tsbuildinfo
+# Sentry / secrets / private config
+.sentryclirc
+
+# -----------------------------------------------------------------------------
+# OS / editor / local tooling
+# -----------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# -----------------------------------------------------------------------------
+# Optional: docs or exports generated locally
+# Uncomment only if these are generated artifacts and not source files.
+# -----------------------------------------------------------------------------
+docs/build/
+exports/
